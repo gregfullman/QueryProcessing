@@ -22,6 +22,7 @@ namespace QueryProcessing
                         new JProperty("DOB", new DateTime(1987, 7, 27)),
                         new JProperty("NetWorth", 300),
                         new JProperty("TimeElapsed", new TimeSpan(2, 12, 20, 30)),
+                        new JProperty("IsEmployed", true),
                         new JProperty("Job",
                             new JObject(
                                 new JProperty("Employer", "Tyler Technologies"),
@@ -33,7 +34,17 @@ namespace QueryProcessing
                                 new JProperty("Street", "12 Jameco Mill Road"),
                                 new JProperty("City", "Scarborough"),
                                 new JProperty("State", "ME"),
-                                new JProperty("ZipCode", "04074")
+                                new JProperty("ZipCode", "04074"),
+                                new JProperty("PreviousOwners",
+                                    new JArray(
+                                        new JObject(
+                                            new JProperty("Name", "Bob")
+                                        ),
+                                        new JObject(
+                                            new JProperty("Name", "Chris")
+                                        )
+                                    )
+                                )
                             ),
                             new JObject(
                                 new JProperty("Street", "2218 Schoharie Turnpike"),
@@ -48,6 +59,7 @@ namespace QueryProcessing
                         new JProperty("DOB", new DateTime(1987, 7, 28)),
                         new JProperty("NetWorth", 50.3),
                         new JProperty("TimeElapsed", new TimeSpan(12, 20, 30)),
+                        new JProperty("IsEmployed", true),
                         new JProperty("Addresses", new JArray(
                             new JObject(
                                 new JProperty("Street", "12 Jameco Mill Road"),
@@ -68,6 +80,7 @@ namespace QueryProcessing
                         new JProperty("DOB", null),
                         new JProperty("NetWorth", null),
                         new JProperty("TimeElapsed", null),
+                        new JProperty("IsEmployed", null),
                         new JProperty("Job",
                             new JObject(
                                 new JProperty("Employer", "Waste Management"),
@@ -79,10 +92,14 @@ namespace QueryProcessing
                         new JProperty("Name", null),
                         new JProperty("DOB", null),
                         new JProperty("NetWorth", -150)
+                    ),
+                    new JObject(
                     )
                 );
 
             var queryable = dataArray.AsQueryable();
+            var parsingConfig = ParsingConfig.Default;
+            parsingConfig.CustomTypeProvider = new CustomTypeProvider();
 
             #region Count
             var simpleCount = queryable.Count();
@@ -93,6 +110,9 @@ namespace QueryProcessing
             // String(value) handles null values no problem
             var filteredByString = queryable.ApplyPropertiesExistFilter("Name").Where("String(Name) == @0", "Greg");
             var stringFilteringCount = filteredByString.Count();
+
+            var filteredByStringContains = queryable.ApplyPropertiesExistFilter("Name").Where("(Name.Type == @1 ? String.Empty : String(Name)).Contains(@0)", "Greg", JTokenType.Null);
+            var filteredByStringContainsCount = filteredByStringContains.Count();
 
             // DateTime(value) does not handle null values. Need to check for null
             var filteredByDate = queryable.ApplyPropertiesExistFilter("DOB").Where("(DOB.Type == @1 ? DateTime.MinValue : DateTime(DOB)) <= @0", new DateTime(1987, 7, 27), JTokenType.Null);
@@ -106,6 +126,9 @@ namespace QueryProcessing
             var filteredByTimeSpan = queryable.ApplyPropertiesExistFilter("TimeElapsed").Where("(TimeElapsed.Type == @1 ? TimeSpan.MinValue : TimeSpan.Parse(String(TimeElapsed))) >= @0", new TimeSpan(18, 20, 0), JTokenType.Null);
             var timeSpanFilteringCount = filteredByTimeSpan.Count();
 
+            var filteredByBool = queryable.ApplyPropertiesExistFilter("IsEmployed").Where("(IsEmployed.Type == @1 ? false : Boolean(IsEmployed)) == @0", true, JTokenType.Null);
+            var filteredByBoolCount = filteredByBool.Count();
+
             // Filtering on a nested one-to-one field
             var filteringNestedOneToOne = queryable.ApplyPropertiesExistFilter("Job.Position").Where("String(Job.Position) == @0", "Engineer");
             var filteringNestedOneToOneCount = filteringNestedOneToOne.Count();
@@ -113,6 +136,49 @@ namespace QueryProcessing
             // Filtering on a nested one-to-many field
             var filteringNestedOneToMany = queryable.ApplyPropertiesExistFilter("Addresses.State").Where("Addresses.Any(String(State) == @0)", "ME");
             var filteringNestedOneToManyCount = filteringNestedOneToMany.Count();
+
+            // FIltering on multiple nested sequence operators
+            var multipleNestedAny = queryable.ApplyPropertiesExistFilter("Addresses.PreviousOwners").Where("Addresses.Any(PreviousOwners.Any())");
+            var multipleNestedAnyCount = multipleNestedAny.Count();
+
+            var multipleNestedPropertyFilter = queryable.ApplyPropertiesExistFilter("Addresses.PreviousOwners.Name").Where("Addresses.Any(PreviousOwners.Any(String(Name) == @0))", "Chris");
+            var multipleNestedPropertyFilterCount = multipleNestedPropertyFilter.Count();
+            #endregion
+
+            #region Grouping
+
+            var groupingByTopLevelBool = queryable.ApplyPropertiesExistFilter("IsEmployed").GroupBy("IsEmployed");
+            var distinctGroupsCount = groupingByTopLevelBool.Count(); // == 2
+
+            var groupingByOneToOneField = queryable.ApplyPropertiesExistFilter("Job.Position").GroupBy("Job.Position");
+            var distinctPositionGroupsCount = groupingByOneToOneField.Count(); // == 2
+
+            var groupingByOneToManyField = queryable.ApplyPropertiesExistFilter("Addresses.State")
+                                                    .SelectMany("Addresses.Select(it)",     // Hacky workaround to force JToken that is a JArray to be recognized as an enumerable
+                                                                "new(Outer as Parent, Inner as Address)", 
+                                                                "Outer", 
+                                                                "Inner")
+                                                    .GroupBy("Address.State");
+
+            var distinctAddressStateGroupCount = groupingByOneToManyField.Count(); // == 2
+
+            #endregion
+
+            #region Selection
+
+            var firstNameSelector = queryable.SelectProperties(new NameProjection("Name"));
+            var nestedOneToOneSelector = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("DOB"), new NameProjection("Job.Position", "Position"));
+            var nestedOneToManySelector = queryable.SelectProperties(new NameProjection("Name"), 
+                                                                     new NameProjection("Job.Position", "Position"),
+                                                                     new NameProjection("Addresses", new List<NameProjection>
+                                                                     {
+                                                                         new NameProjection("State"),
+                                                                         new NameProjection("City"),
+                                                                         new NameProjection("PreviousOwners", new List<NameProjection>
+                                                                         {
+                                                                             new NameProjection("Name")
+                                                                         })
+                                                                     }));
             #endregion
 
             var i = 0;

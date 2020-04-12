@@ -11,13 +11,24 @@ namespace QueryProcessing
             var sb = new StringBuilder();
             for (int i = 0; i < propertyNames.Length; i++)
             {
-                // TODO: need to handle nested properties (one-to-one and one-to-many)
-                // Probably best to handle that in the ExpandObjectHelper class
                 if (i > 0)
                     sb.Append(" && ");
                 sb.Append($"ExpandoObjectHelper.HasProperty(it, @{i})");
             }
             return queryable.Where(sb.ToString(), propertyNames.Cast<object>().ToArray());
+        }
+
+        public static IQueryable SelectProperties(this IQueryable queryable, params NameProjection[] propertyProjections)
+        {
+            var sb = new StringBuilder("new(");
+            for (int i = 0; i < propertyProjections.Length; i++)
+            {
+                if (i > 0)
+                    sb.Append(", ");
+                sb.Append($"ExpandoObjectHelper.SelectProperty(it, @{i}) as {propertyProjections[i].TargetPropertyName}");
+            }
+            sb.Append(")");
+            return queryable.Select(sb.ToString(), propertyProjections.Cast<object>().ToArray());
         }
     }
 }
