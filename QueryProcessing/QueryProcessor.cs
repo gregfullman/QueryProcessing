@@ -82,11 +82,7 @@ namespace QueryProcessing
                     )
                 );
 
-            var expConverter = new ExpandoObjectConverter();
-            var dynamicArray = JsonConvert.DeserializeObject<List<ExpandoObject>>(dataArray.ToString(), expConverter);
-
-            var queryable = dynamicArray.ToDynamicList().AsQueryable() as IQueryable;
-            //var queryable = dataArray.AsQueryable();
+            var queryable = dataArray.AsQueryable();
 
             #region Count
             var simpleCount = queryable.Count();
@@ -99,16 +95,15 @@ namespace QueryProcessing
             var stringFilteringCount = filteredByString.Count();
 
             // DateTime(value) does not handle null values. Need to check for null
-            var filteredByDate = queryable.ApplyPropertiesExistFilter("DOB").Where("(DOB == null ? DateTime.MinValue : DateTime(it.DOB)) <= @0", new DateTime(1987, 7, 27));
-            // var filteredByDate = queryable.ApplyPropertiesExistFilter("DOB").Where("(it[\"DOB\"].Type == @1 ? DateTime.MinValue : DateTime(it[\"DOB\"])) <= @0", new DateTime(1987, 7, 27), JTokenType.Null);
+            var filteredByDate = queryable.ApplyPropertiesExistFilter("DOB").Where("(DOB.Type == @1 ? DateTime.MinValue : DateTime(DOB)) <= @0", new DateTime(1987, 7, 27), JTokenType.Null);
             var dateFilteredCount = filteredByDate.Count();
 
             // Convert.ToDecimal converts null to zero. So we need to account for null specifically
-            var filteredByNumber = queryable.ApplyPropertiesExistFilter("NetWorth").Where("(NetWorth == null ? Decimal.MinValue : Convert.ToDecimal(NetWorth)) <= @0", Convert.ToDecimal(0));
+            var filteredByNumber = queryable.ApplyPropertiesExistFilter("NetWorth").Where("(NetWorth.Type == @1 ? Decimal.MinValue : Convert.ToDecimal(NetWorth)) <= @0", Convert.ToDecimal(0), JTokenType.Null);
             var numberFilteredCount = filteredByNumber.Count();
 
             // TimeSpans are not stored as a CLR type in JSON objects, they're stored as strings. So we need to cast as string and then parse using TimeSpan.Parse
-            var filteredByTimeSpan = queryable.ApplyPropertiesExistFilter("TimeElapsed").Where("(TimeElapsed == null ? TimeSpan.MinValue : TimeSpan.Parse(String(TimeElapsed))) >= @0", new TimeSpan(18, 20, 0));
+            var filteredByTimeSpan = queryable.ApplyPropertiesExistFilter("TimeElapsed").Where("(TimeElapsed.Type == @1 ? TimeSpan.MinValue : TimeSpan.Parse(String(TimeElapsed))) >= @0", new TimeSpan(18, 20, 0), JTokenType.Null);
             var timeSpanFilteringCount = filteredByTimeSpan.Count();
 
             // Filtering on a nested one-to-one field
@@ -116,9 +111,7 @@ namespace QueryProcessing
             var filteringNestedOneToOneCount = filteringNestedOneToOne.Count();
 
             // Filtering on a nested one-to-many field
-            var preFiltered = queryable.ApplyPropertiesExistFilter("Addresses.State");
-            var list = preFiltered.ToDynamicList();
-            var filteringNestedOneToMany = preFiltered.Where("Addresses.Any(String(State) == @0)", "ME");
+            var filteringNestedOneToMany = queryable.ApplyPropertiesExistFilter("Addresses.State").Where("Addresses.Any(String(State) == @0)", "ME");
             var filteringNestedOneToManyCount = filteringNestedOneToMany.Count();
             #endregion
 

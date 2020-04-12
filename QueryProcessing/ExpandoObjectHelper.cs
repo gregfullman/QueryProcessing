@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.Dynamic;
 using System.Linq;
@@ -11,25 +12,22 @@ namespace QueryProcessing
     {
         public static bool HasProperty(object obj, string key)
         {
-            if (obj is ExpandoObject expando)
+            if (obj is JObject jObj)
             {
-                var tempExpando = expando;
+                var tempObj = jObj;
                 var split = key.Split('.');
-                for(int i = 0; i < split.Length; i++)
+                for (int i = 0; i < split.Length; i++)
                 {
-                    // check if the current property exists
-                    if (!(tempExpando as IDictionary<string, object>).ContainsKey(split[i]))
+                    if (!tempObj.ContainsKey(split[i]))
                         return false;
-                    if(i+1 < split.Length)
+                    if (i + 1 < split.Length)
                     {
-                        // Check for the nested property
-                        var nestedObj = (tempExpando as IDictionary<string, object>)[split[i]];
-                        if (nestedObj is ExpandoObject)
-                            tempExpando = nestedObj as ExpandoObject;
-                        else if (nestedObj is IEnumerable<object> nestedObjArray)
+                        var nestedObj = tempObj[split[i]];
+                        if (nestedObj is JObject)
+                            tempObj = nestedObj as JObject;
+                        else if(nestedObj is JArray nestedObjArray)
                         {
-                            var expandObjArray = nestedObjArray.Cast<ExpandoObject>();
-                            return expandObjArray.Any(x => HasProperty(x, string.Join(".", split.Skip(i + 1))));
+                            return nestedObjArray.Any(x => HasProperty(x, string.Join(".", split.Skip(i + 1))));
                         }
                         else
                             // TODO: not sure what this scenario is.
