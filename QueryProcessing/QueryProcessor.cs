@@ -26,7 +26,8 @@ namespace QueryProcessing
                         new JProperty("Job",
                             new JObject(
                                 new JProperty("Employer", "Tyler Technologies"),
-                                new JProperty("Position", "Engineer")
+                                new JProperty("Position", "Engineer"),
+                                new JProperty("Salary", "50000")
                             )
                         ),
                         new JProperty("Addresses", new JArray(
@@ -84,7 +85,8 @@ namespace QueryProcessing
                         new JProperty("Job",
                             new JObject(
                                 new JProperty("Employer", "Waste Management"),
-                                new JProperty("Position", "Engineer")
+                                new JProperty("Position", "Engineer"),
+                                 new JProperty("Salary", "70000")
                             )
                         )
                     ),
@@ -166,6 +168,7 @@ namespace QueryProcessing
 
             #region Selection
 
+            // Using the SelectProperties extension method in conjunction with the NameProjection class allow us to handle missing fields, getting them converted to null
             var firstNameSelector = queryable.SelectProperties(new NameProjection("Name"));
             var nestedOneToOneSelector = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("DOB"), new NameProjection("Job.Position", "Position"));
             var nestedOneToManySelector = queryable.SelectProperties(new NameProjection("Name"), 
@@ -179,7 +182,40 @@ namespace QueryProcessing
                                                                              new NameProjection("Name")
                                                                          })
                                                                      }));
+
+            var rootLevelCalculation = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("TimeElapsed"), new NameProjection("NetWorth"))
+                                                // Calculate NetWorth/TimeElapsed (dollars per hour?)
+                                                // Check for null or JTokenType.Null, since the SelectProperties logic adds actual nulls (TODO: need to do this check everywhere)
+                                                .Select("new(Name as Name, (NetWorth == null || TimeElapsed == null || NetWorth.Type == @0 || TimeElapsed.Type == @0 ? null : (Decimal(NetWorth) / Decimal(TimeSpan.Parse(String(TimeElapsed)).TotalHours))) as DollarsPerHour)", JTokenType.Null);
+
+            // Calculation with SQL-style null handling
+            var nestedOneToOneCalculationSqlNullHandling = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("NetWorth"), new NameProjection("Job.Salary", "Salary"))
+                                                                    .Select("new(Name as Name, (NetWorth == null || Salary == null || NetWorth.Type == @0 || Salary.Type == @0 ? null : (Decimal(NetWorth) + Decimal(Salary))) as Total)", JTokenType.Null);
+
+            var nestedOneToOneCalculationLogicalNulHandling = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("NetWorth"), new NameProjection("Job.Salary", "Salary"))
+                                                                        .Select(@"new(
+                                                                                        (
+                                                                                            (NetWorth == null || NetWorth.Type == @0) && (Salary == null || Salary.Type == @0)
+                                                                                        ) ? null : 
+                                                                                        (
+                                                                                            (
+                                                                                                (NetWorth == null || NetWorth.Type == @0) ? 0 : Decimal(NetWorth)
+                                                                                            ) + 
+                                                                                            (
+                                                                                                (Salary == null || Salary.Type == @0) ? 0 : Decimal(Salary)
+                                                                                            )
+                                                                                        ) as Total
+                                                                                    )", JTokenType.Null);
+
+            var nestedOneToManyAggregationSqlNullHandling = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("Addresses"))
+                                                                     .Select("new(Name as Name, ((Addresses == null || Addresses.Type == @0) ? null : Addresses.Count()) as AddressCount)", JTokenType.Null);
+
+            var nestedOneToManyAggregationLogicalNullHandling = queryable.SelectProperties(new NameProjection("Name"), new NameProjection("Addresses"))
+                                                                         .Select("new(Name as Name, ((Addresses == null || Addresses.Type == @0) ? 0 : Addresses.Count()) as AddressCount)", JTokenType.Null);
+
             #endregion
+
+
 
             var i = 0;
         }
